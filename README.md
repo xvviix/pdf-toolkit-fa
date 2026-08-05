@@ -23,6 +23,7 @@
 <img src="https://img.shields.io/badge/Linux-✓-06B6D4?style=flat-square&logo=linux&logoColor=white" alt="Linux"/>
 <img src="https://img.shields.io/badge/macOS-✓-06B6D4?style=flat-square&logo=apple&logoColor=white" alt="macOS"/>
 <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="MIT"/>
+<img src="https://github.com/xvviix/pdf-toolkit-fa/actions/workflows/ci.yml/badge.svg" alt="CI"/>
 
 <br/>
 
@@ -230,6 +231,8 @@ pdf-toolkit-fa/
 ├── pdf_toolkit_v12.py    ← برنامهٔ اصلی (کد کامل)
 ├── requirements.txt      ← وابستگی‌ها
 ├── README.md             ← این فایل
+├── LICENSE               ← مجوز MIT
+├── test_smoke.py         ← تست‌های خودکار
 ├── .gitignore            ← فایل‌های نادیده‌گرفته‌شده
 └── .paddlex/             ← مدل‌های OCR (از قبل آماده — بدون نیاز به اینترنت)
     └── official_models/
