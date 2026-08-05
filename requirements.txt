@@ -1,0 +1,46 @@
+# ─────────────────────────────────────────────────────────────
+#  PDF Toolkit v12 — وابستگی‌های لازم (نسخهٔ کامل و نهایی)
+#  نصب:  pip install -r requirements.txt
+# ─────────────────────────────────────────────────────────────
+
+# ── هستهٔ PDF ──
+pypdf>=4.0
+PyMuPDF>=1.24
+Pillow>=10.0
+
+# ── OCR فارسی (PaddleOCR) ──
+paddlepaddle>=3.0
+paddleocr>=3.0
+paddlex[ocr]>=3.7
+
+# ── paddlex[ocr] — همه‌ی پکیج‌ها صریح (برای اطمینان کامل) ──
+beautifulsoup4
+einops
+ftfy
+imagesize
+Jinja2
+latex2mathml
+lxml
+opencv-contrib-python==4.10.0.84
+openpyxl
+premailer
+pyclipper
+pypdfium2>=4
+python-bidi
+regex
+safetensors>=0.7.0
+scikit-learn
+scipy
+sentencepiece
+shapely
+tiktoken
+tokenizers>=0.19
+
+# ── وابسته‌های paddleocr/paddlex ──
+modelscope>=1.39
+modelscope-hub>=0.2
+aistudio-sdk>=0.3
+bce-python-sdk
+
+# ── موتور OCR سبک برای انگلیسی (اختیاری) ──
+rapidocr-onnxruntime>=1.2
