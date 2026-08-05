@@ -78,7 +78,7 @@ pdf-toolkit-fa/
 ├── pdf_toolkit_v12.py    ← برنامهٔ اصلی
 ├── requirements.txt      ← وابستگی‌ها
 ├── README.md             ← این فایل
-└── icon_for_exe.ico      ← آیکون (اختیاری)
+└── .paddlex/             ← مدل‌های OCR (از قبل آماده — بدون نیاز به اینترنت)
 ```
 
 ## 📦 نصب دستی (در صورت نیاز)
