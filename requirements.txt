@@ -28,7 +28,7 @@ pyclipper
 pypdfium2>=4
 python-bidi
 regex
-safetensors>=0.7.0
+safetensors>=0.5.3
 scikit-learn
 scipy
 sentencepiece
