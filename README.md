@@ -123,6 +123,7 @@ python pdf_toolkit_v12.py
 python -m venv venv
 source venv/bin/activate    # لینوکس/مک
 venv\Scripts\activate       # ویندوز
+python -m pip install --upgrade pip   # pip قدیمی باعث خطای نصب می‌شود
 pip install -r requirements.txt        # هسته اصلی فقط
 pip install -r requirements-ocr.txt    # اختیاری — OCR (~۱ گیگابایت)
 
@@ -260,6 +261,7 @@ pdf-toolkit-fa/
 | نصب OCR ناموفق است | پکیج OCR حدود ۱ گیگابایت است — فضای دیسک و اینترنت را بررسی کنید یا از پایتون 3.12/3.13 استفاده کنید |
 | اسامی به‌هم‌ریخته است | صفحه را بهتر اسکن کنید یا نام موردنظر را زرد هایلایت کنید |
 | نصب کتابخانه خطا داد | اینترنت را چک کنید و `run.bat` را دوباره بزنید |
+| نصب کتابخانه روی سیستم جدید خطا می‌دهد | احتمالاً pip قدیمی است — `run.bat` حالا اول pip را آپدیت می‌کند؛ دستی هم: `python -m pip install --upgrade pip` |
 | فایل خروجی باز نمی‌شود | گزارش نهایی را بررسی کنید — اگر «سالم» نیست، دوباره عملیات را اجرا کنید |
 
 ---

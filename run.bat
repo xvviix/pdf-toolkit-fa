@@ -67,6 +67,13 @@ echo ============================================================
 echo  This step only takes long on the first run.
 echo  Already installed packages are skipped.
 echo.
+REM Old pip versions fail to resolve/install some packages - upgrade it first
+echo  Updating pip first ...
+python -m pip install --upgrade pip
+if errorlevel 1 (
+  echo  [WARNING] Could not upgrade pip. Continuing anyway...
+)
+echo.
 python -m pip install -r requirements.txt
 if errorlevel 1 goto install_fail
 echo.
