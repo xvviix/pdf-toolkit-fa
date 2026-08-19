@@ -85,7 +85,7 @@ PYMUPDF_AVAILABLE = False
 def _lazy_import(name):
     try:
         return __import__(name)
-    except Importخطا:
+    except ImportError:
         return None
 
 def ensure_pdf_libs():
@@ -192,14 +192,14 @@ def parse_page_ranges(total: int, spec: str):
                 for p in range(start, end):
                     if 0 <= p < total:
                         صفحه.add(p)
-            except Valueخطا:
+            except ValueError:
                 continue
         else:
             try:
                 p = int(part) - 1
                 if 0 <= p < total:
                     صفحه.add(p)
-            except Valueخطا:
+            except ValueError:
                 continue
     return sorted(صفحه)
 
@@ -811,7 +811,7 @@ class PDFToolkit:
             for e in entries:
                 try:
                     r = PdfReader(str(Path(self.output_dir.get()) / f"{e['name']}.pdf"))
-                    if len(r.صفحه) == e["صفحه"]:
+                    if len(r.pages) == e["صفحه"]:
                         ok_files += 1
                 except Exception:
                     pass
@@ -924,7 +924,7 @@ class PDFToolkit:
         for pdf_path in self.pdf_files:
             try:
                 _r = PdfReader(str(pdf_path))
-                grand_total += len(parse_page_ranges(len(_r.صفحه), range_spec))
+                grand_total += len(parse_page_ranges(len(_r.pages), range_spec))
             except Exception:
                 pass
 
@@ -934,7 +934,7 @@ class PDFToolkit:
             used_names = set()   # برای جلوگیری از overwrite اسامی تکراری
             try:
                 reader = PdfReader(str(pdf_path))
-                total_صفحه = len(reader.صفحه)
+                total_صفحه = len(reader.pages)
                 صفحه = parse_page_ranges(total_صفحه, range_spec)
                 if not صفحه: continue
 
@@ -947,7 +947,7 @@ class PDFToolkit:
                     if mode == "split_all" or (mode == "extract" and separate):
                         for idx in صفحه:
                             writer = PdfWriter()
-                            writer.add_page(reader.صفحه[idx])
+                            writer.add_page(reader.pages[idx])
                             fname = self._make_output_name(base, idx, prefix, naming,
                                                            ocr_type, ocr_engine, doc)
                             fname = self._unique_name(fname, used_names)
@@ -964,7 +964,7 @@ class PDFToolkit:
                             chunk = صفحه[chunk_start:chunk_start + every_n]
                             writer = PdfWriter()
                             for idx in chunk:
-                                writer.add_page(reader.صفحه[idx])
+                                writer.add_page(reader.pages[idx])
                             # نام از اولین صفحهٔ هر گروه خوانده می‌شود
                             fname = prefix.format(name=base, page=chunk[0] + 1)
                             if ocr_engine is not None:
@@ -982,7 +982,7 @@ class PDFToolkit:
                     else:
                         writer = PdfWriter()
                         for idx in صفحه:
-                            writer.add_page(reader.صفحه[idx])
+                            writer.add_page(reader.pages[idx])
                         # در حالت غیرجدا, نام فقط یک بار از اولین صفحهٔ انتخابی خوانده می‌شود
                         fname = prefix.format(name=base, page='sel')
                         if ocr_engine is not None and صفحه:
@@ -1323,7 +1323,7 @@ class PDFToolkit:
         try:
             try:
                 import fitz
-            except Importخطا:
+            except ImportError:
                 return ""
             # ۱) اول: ناحیهٔ هایلایت شده (اگر باشد)
             hl_name = self._ocr_highlighted_name(ocr_type, ocr_engine, doc, page_num)
@@ -1366,7 +1366,7 @@ class PDFToolkit:
                 if tmp_name:
                     try:
                         os.unlink(tmp_name)
-                    except OSخطا:
+                    except OSError:
                         pass
             if not lines:
                 return ""
@@ -1385,7 +1385,7 @@ class PDFToolkit:
         """
         try:
             import fitz
-        except Importخطا:
+        except ImportError:
             return None
         MARK_TYPES = (8, 9, 10, 11)   # Highlight, Underline, Squiggly, StrikeOut
         candidates = []
@@ -1436,7 +1436,7 @@ class PDFToolkit:
         try:
             try:
                 import fitz
-            except Importخطا:
+            except ImportError:
                 return ""
             page = doc[page_num]
             rect = self._find_highlight_rect(page)
@@ -1477,7 +1477,7 @@ class PDFToolkit:
                 if tmp_name:
                     try:
                         os.unlink(tmp_name)
-                    except OSخطا:
+                    except OSError:
                         pass
             if not texts:
                 return ""
@@ -1528,9 +1528,9 @@ class PDFToolkit:
             total_صفحه = 0
             for pdf_path in self.pdf_files:
                 reader = PdfReader(str(pdf_path))
-                for page in reader.صفحه:
+                for page in reader.pages:
                     writer.add_page(page)
-                total_صفحه += len(reader.صفحه)
+                total_صفحه += len(reader.pages)
             out_path = out_dir / out_name
             with open(out_path, "wb") as f: writer.write(f)
             self.log_q.put((f"✓ Merge success: {out_name} ({total_صفحه} صفحه)", "ok"))
@@ -1588,8 +1588,8 @@ class PDFToolkit:
                 reader = PdfReader(str(pdf_path))
                 writer = PdfWriter()
                 angle = self.rotate_angle.get()
-                صفحه_rot = parse_page_ranges(len(reader.صفحه), self.rotate_range.get())
-                for i, page in enumerate(reader.صفحه):
+                صفحه_rot = parse_page_ranges(len(reader.pages), self.rotate_range.get())
+                for i, page in enumerate(reader.pages):
                     if i in صفحه_rot:
                         page.rotate(angle)
                     writer.add_page(page)
@@ -1607,10 +1607,10 @@ class PDFToolkit:
         for pdf_path in self.pdf_files:
             try:
                 reader = PdfReader(str(pdf_path))
-                صفحه = parse_page_ranges(len(reader.صفحه), self.text_range.get())
+                صفحه = parse_page_ranges(len(reader.pages), self.text_range.get())
                 text = ""
                 for i in صفحه:
-                    text += f"\n=== صفحه {i+1} ===\n{reader.صفحه[i].extract_text() or ''}\n"
+                    text += f"\n=== صفحه {i+1} ===\n{reader.pages[i].extract_text() or ''}\n"
                 outf = out_dir / f"{pdf_path.stem}_text.txt"
                 with open(outf, "w", encoding="utf-8") as f: f.write(text)
                 self.log_q.put((f"✓ متن استخراج شد: {outf.name}", "ok"))
@@ -1627,7 +1627,7 @@ class PDFToolkit:
         pdf_path = self.pdf_files[idx]
         try:
             reader = PdfReader(str(pdf_path))
-            txt = f"File: {pdf_path.name}\nPages: {len(reader.صفحه)}\nSize: {pdf_path.stat().st_size/1024:.1f} KB"
+            txt = f"File: {pdf_path.name}\nPages: {len(reader.pages)}\nSize: {pdf_path.stat().st_size/1024:.1f} KB"
             messagebox.showinfo("اطلاعات PDF", txt)
         except Exception as e:
             messagebox.showerror("خطا", str(e))
