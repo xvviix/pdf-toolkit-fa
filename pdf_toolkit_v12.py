@@ -93,7 +93,6 @@ def ensure_pdf_libs():
     if not PYPDF_AVAILABLE:
         try:
             from pypdf import PdfReader, PdfWriter as _PdfWriter
-            PdfReader = PdfReader
             PdfWriter = _PdfWriter
             PYPDF_AVAILABLE = True
         except Exception:
@@ -126,30 +125,43 @@ TEXT_S    = "#86efac"
 BORDER    = "#14532d"
 BORDER_L  = "#166534"
 
+# The Persian font is detected lazily by _apply_persian_font() using the
+# app's own Tk root — this avoids creating and destroying a spare Tk root
+# at import time, which breaks on some platforms (e.g. macOS).
 _PFONT = "Tahoma"
-
-def _best_persian_font():
-    try:
-        import tkinter as _tk
-        import tkinter.font as _font
-        root = _tk.Tk()
-        root.withdraw()
-        families = set(_font.families(root))
-        root.destroy()
-        for f in ["Vazir", "Vazirmatn", "Sahel", "B Nazanin", "IranSans", "Tahoma"]:
-            if f in families:
-                return f
-    except:
-        pass
-    return "Tahoma"
-
-_PFONT = _best_persian_font()
+_PERSIAN_FONT_CANDIDATES = ["Vazir", "Vazirmatn", "Sahel", "B Nazanin", "IranSans", "Tahoma"]
 
 FT = (_PFONT, 17, "bold")
 FH = (_PFONT, 12, "bold")
 FB = (_PFONT, 10)
 FS = (_PFONT, 9)
 FM = (_PFONT, 9)   # entries / listboxes now use the Persian font too
+
+def _apply_persian_font(root):
+    """Detect the best available Persian font using the app's real Tk root.
+
+    Called from PDFToolkit.__init__ before any widget is built. Falls back
+    to Tahoma when font introspection is unavailable (e.g. headless tests).
+    """
+    global _PFONT, FT, FH, FB, FS, FM
+    try:
+        import tkinter.font as _font
+        families = set(_font.families(root))
+        for f in _PERSIAN_FONT_CANDIDATES:
+            if f in families:
+                break
+        else:
+            return
+        if f == _PFONT:
+            return
+        _PFONT = f
+        FT = (_PFONT, 17, "bold")
+        FH = (_PFONT, 12, "bold")
+        FB = (_PFONT, 10)
+        FS = (_PFONT, 9)
+        FM = (_PFONT, 9)
+    except Exception:
+        pass
 
 def _lighten(hex_c, n=18):
     try:
@@ -248,6 +260,7 @@ def _styled_entry(parent, textvariable=None, width=None, ipady=5, **kw):
 class PDFToolkit:
     def __init__(self, root):
         self.root = root
+        _apply_persian_font(root)
         self.root.title("PDF Toolkit v12 — ابزار قدرتمند PDF")
         self.root.geometry("880x620")           # Smaller default size
         self.root.minsize(680, 460)             # Much lower minimum
@@ -1060,6 +1073,7 @@ class PDFToolkit:
         warn_count = 0
         bad_count = 0
         for i, (src_name, person) in enumerate(results):
+            status = "bad"  # پیش‌فرض؛ در شاخه‌ی else بدون خطا باقی می‌ماند
             if person and person != "⚠ OCR engine not installed":
                 status, score, issues = self._validate_name(person)
                 icon = self._name_status_icon(status)

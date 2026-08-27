@@ -15,7 +15,7 @@
 
 <br/>
 
-<img src="https://img.shields.io/badge/Python-3.8%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python"/>
+<img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python"/>
 <img src="https://img.shields.io/badge/Version-v12-10B981?style=flat-square" alt="Version"/>
 <img src="https://img.shields.io/badge/OCR-PaddleOCR-4F46E5?style=flat-square" alt="OCR"/>
 <img src="https://img.shields.io/badge/UI-Tkinter-10B981?style=flat-square" alt="UI"/>
