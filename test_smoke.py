@@ -280,6 +280,48 @@ def test_unique_name():
     assert m.PDFToolkit._unique_name("تک", used) == "تک 3"
 
 
+def test_colored_regions():
+    f = m.PDFToolkit._find_colored_regions
+    w, h = 200, 120
+
+    def make(rows):
+        buf = bytearray(b"\xff\xff\xff" * (w * h))
+        for x, y, (r, g, b) in rows:
+            o = (y * w + x) * 3
+            buf[o:o + 3] = bytes((r, g, b))
+        return bytes(buf)
+
+    def stroke(y0, y1, x0, x1, rgb):
+        out = []
+        for y in range(y0, y1):
+            for x in range(x0, x1):
+                out.append((x, y, rgb))
+        return out
+
+    # 1) yellow marker + black text line -> exactly one region (the marker)
+    rows = stroke(50, 60, 40, 150, (255, 220, 0)) + stroke(12, 16, 30, 90, (20, 20, 20))
+    regions = f(w, h, make(rows), w * 3)
+    assert len(regions) == 1, regions
+    r = regions[0]
+    assert 36 <= r["x0"] <= 48 and 144 <= r["x1"] <= 162
+    assert 42 <= r["y0"] <= 54 and 54 <= r["y1"] <= 72
+
+    # 2) pure black/gray/white page -> no colored region
+    rows = stroke(10, 20, 20, 180, (0, 0, 0)) + stroke(30, 40, 20, 180, (90, 90, 90))
+    assert f(w, h, make(rows), w * 3) == []
+
+    # 3) pink AND blue markers are detected too (all colors, not just yellow)
+    rows = stroke(50, 60, 20, 120, (250, 160, 190)) + stroke(80, 90, 40, 160, (30, 90, 220))
+    regions = f(w, h, make(rows), w * 3)
+    assert len(regions) == 2, regions
+
+    # 4) two adjacent marker strokes (first + family name) merge into one region
+    rows = stroke(50, 60, 20, 90, (255, 220, 0)) + stroke(50, 60, 95, 170, (255, 220, 0))
+    regions = f(w, h, make(rows), w * 3)
+    assert len(regions) == 1, regions
+    assert regions[0]["x1"] - regions[0]["x0"] > 140
+
+
 def test_ui_builds():
     root = FakeRoot()
     app = m.PDFToolkit(root)
@@ -300,6 +342,7 @@ def main():
         test_extract_person_name,
         test_clean_highlight_text,
         test_unique_name,
+        test_colored_regions,
         test_ui_builds,
     ]
     passed = 0

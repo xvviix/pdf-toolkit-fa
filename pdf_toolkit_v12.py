@@ -1331,8 +1331,8 @@ class PDFToolkit:
     def _ocr_person_name(self, ocr_type, ocr_engine, doc, page_num):
         """نام کامل فرد (نام + نام خانوادگی) را برمی‌گرداند.
 
-        اگر کاربر روی صفحه هایلایت (ترجیحاً زرد) گذاشته باشد, فقط همان
-        ناحیه خوانده می‌شود؛ وگرنه کل صفحه OCR می‌شود.
+        اگر کاربر روی صفحه هایلایت زده باشد (دیجیتال یا ماژیک دستی — هر رنگی),
+        فقط همان ناحیه خوانده می‌شود؛ وگرنه کل صفحه OCR می‌شود.
         """
         try:
             try:
@@ -1392,10 +1392,10 @@ class PDFToolkit:
             return ""
 
     def _find_highlight_rect(self, page):
-        """مستطیل ناحیهٔ هایلایت‌شده را برمی‌گرداند (ترجیحاً زرد).
+        """مستطیل ناحیهٔ هایلایت‌شده را برمی‌گرداند (هر رنگی).
 
         هایلایت = انوتیشن از نوع Highlight/Underline/Squiggly/StrikeOut.
-        اگر چند هایلایت باشد, زردها اولویت دارند؛ وگرنه اولین.
+        رنگ انوتیشن مهم نیست: زرد، صورتی، سبز، آبی و... همه شمرده می‌شوند.
         """
         try:
             import fitz
@@ -1403,7 +1403,6 @@ class PDFToolkit:
             return None
         MARK_TYPES = (8, 9, 10, 11)   # Highlight, Underline, Squiggly, StrikeOut
         candidates = []
-        yellow = []
         try:
             annots = list(page.annots()) if page.annots() else []
         except Exception:
@@ -1418,33 +1417,116 @@ class PDFToolkit:
                 rect = annot.rect
                 if rect.is_empty or rect.is_infinite:
                     continue
-                # تشخیص رنگ زرد
-                is_yellow = False
-                try:
-                    colors = annot.colors or {}
-                    stroke = colors.get("stroke")
-                    if stroke:
-                        r, g, b = stroke[0], stroke[1], stroke[2]
-                        # زرد: قرمز و سبز زیاد, آبی کم
-                        is_yellow = (r > 0.7 and g > 0.6 and b < 0.5)
-                except Exception:
-                    pass
                 candidates.append(rect)
-                if is_yellow:
-                    yellow.append(rect)
             except Exception:
                 continue
-        if yellow:
-            return yellow[0]
-        if candidates:
-            return candidates[0]
-        return None
+        return candidates[0] if candidates else None
+
+    @staticmethod
+    def _find_colored_regions(w, h, data, stride, sat_threshold=30, cell=6, min_cells=6, min_width_px=24):
+        """ناحیه‌های رنگیِ اشباع‌شده (غیر خاکستری/سیاه‌وسفید) را در بافر RGB پیدا می‌کند.
+
+        data: بایت‌های خام RGB (مثل fitz.Pixmap.samples)؛ stride: طول هر ردیف.
+        بازمی‌گرداند: فهرست مستطیل‌ها به مختصات پیکسل
+        {"x0", "y0", "x1", "y1", "count", "width"} — هر ناحیه یک خوشه از
+        سلول‌های رنگیِ همسایه است (مثلاً یک خط ماژیک). هر رنگی در نظر
+        گرفته می‌شود، نه فقط زرد: هر پیکسلی که «سیاه‌وسفید/خاکستری نیست»
+        یعنی max(r,g,b) - min(r,g,b) آستانه را رد کرده، رنگی است.
+        """
+        d = data
+        st = stride
+        th = sat_threshold
+        cl = cell
+        cells = set()
+        for y in range(h):
+            off = y * st
+            gy = y // cl
+            for x3 in range(0, w * 3, 3):
+                r = d[off + x3]
+                g = d[off + x3 + 1]
+                b = d[off + x3 + 2]
+                mx = r if r > g else g
+                if b > mx:
+                    mx = b
+                mn = r if r < g else g
+                if b < mn:
+                    mn = b
+                if mx - mn > th:
+                    cells.add(((x3 // 3) // cl, gy))
+        if not cells:
+            return []
+        seen = set()
+        regions = []
+        for c in cells:
+            if c in seen:
+                continue
+            stack = [c]
+            seen.add(c)
+            cnt = 1
+            minx = maxx = c[0]
+            miny = maxy = c[1]
+            while stack:
+                cx, cy = stack.pop()
+                for dx in (-2, -1, 0, 1, 2):
+                    nx = cx + dx
+                    for dy in (-2, -1, 0, 1, 2):
+                        n2 = (nx, cy + dy)
+                        if n2 in cells and n2 not in seen:
+                            seen.add(n2)
+                            stack.append(n2)
+                            cnt += 1
+                            if n2[0] < minx: minx = n2[0]
+                            if n2[0] > maxx: maxx = n2[0]
+                            if n2[1] < miny: miny = n2[1]
+                            if n2[1] > maxy: maxy = n2[1]
+            if cnt < min_cells:
+                continue
+            px0, py0 = minx * cl, miny * cl
+            px1, py1 = (maxx + 1) * cl, (maxy + 1) * cl
+            if px1 - px0 < min_width_px:
+                continue
+            regions.append({"x0": px0, "y0": py0, "x1": px1, "y1": py1,
+                            "count": cnt, "width": px1 - px0})
+        return regions
+
+    def _find_pixel_marked_rect(self, page):
+        """هایلایت دستی (ماژیک روی کاغذ) را با رنگ پیکسل در صفحهٔ اسکن‌شده پیدا می‌کند.
+
+        صفحه با DPI پایین رندر می‌شود و ناحیهٔ رنگی (هر رنگ غیرسیاه‌وسفید)
+        کشف می‌شود. بهترین ناحیه به‌صورت fitz.Rect با مختصات صفحه بازمی‌گردد.
+        """
+        try:
+            import fitz
+        except ImportError:
+            return None
+        try:
+            pr = page.rect
+            # محدود کردن تعداد پیکسل در صفحات خیلی بزرگ (~۱.۲ میلیون پیکسل)
+            scale = min(1.0, (1_200_000.0 / max(1.0, pr.width * pr.height)) ** 0.5)
+            pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+            if pix.colorspace is not None and getattr(pix.colorspace, "name", "") != "DeviceRGB":
+                pix = fitz.Pixmap(fitz.csRGB, pix)
+            if pix.n < 3:
+                return None
+            regions = self._find_colored_regions(pix.width, pix.height, pix.samples, pix.stride)
+            if not regions:
+                return None
+            best = max(regions, key=lambda r: (r["count"], r["width"]))
+            return fitz.Rect(
+                max(0.0, best["x0"] / scale),
+                max(0.0, best["y0"] / scale),
+                min(pr.width, best["x1"] / scale),
+                min(pr.height, best["y1"] / scale),
+            )
+        except Exception:
+            return None
 
     def _ocr_highlighted_name(self, ocr_type, ocr_engine, doc, page_num):
         """نام را از ناحیهٔ هایلایت‌شده می‌خواند.
 
         - اگر PDF متنی باشد: همان متن داخل هایلایت گرفته می‌شود.
         - اگر PDF اسکن شده باشد: ناحیه به تصویر تبدیل و OCR می‌شود.
+        - هایلایت دستی (ماژیک) روی اسکن‌ها پیکسل‌به‌پیکسل و با هر رنگی پیدا می‌شود.
         برمی‌گرداند: نام تمیز شده یا رشتهٔ خالی.
         """
         try:
@@ -1454,6 +1536,16 @@ class PDFToolkit:
                 return ""
             page = doc[page_num]
             rect = self._find_highlight_rect(page)
+            if rect is None:
+                # هایلایت دستی (ماژیک روی کاغذ) انوتیشن ندارد؛ روی صفحات
+                # اسکن‌شده (بدون لایهٔ متن) ناحیهٔ رنگی را پیکسل‌به‌پیکسل
+                # جست‌وجو می‌کنیم — هر رنگ غیرسیاه‌وسفید.
+                try:
+                    has_text = len(page.get_text("text").strip()) > 20
+                except Exception:
+                    has_text = False
+                if not has_text:
+                    rect = self._find_pixel_marked_rect(page)
             if rect is None:
                 return ""
             # کمی حاشیه دور هایلایت برای خواندن بهتر
