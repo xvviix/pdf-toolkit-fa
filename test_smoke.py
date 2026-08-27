@@ -322,6 +322,53 @@ def test_colored_regions():
     assert regions[0]["x1"] - regions[0]["x0"] > 140
 
 
+class _Clip:
+    def __init__(self, x0, y0, x1, y1):
+        self.x0, self.y0, self.x1, self.y1 = x0, y0, x1, y1
+
+
+def test_pick_name_from_words():
+    app = m.PDFToolkit(FakeRoot())
+
+    # 1) A whole table row is highlighted (header + data row + row below)
+    #    -> only the name/family-name columns are read
+    words = [
+        # header labels (y 160-168)
+        {"x0": 526, "y0": 160, "x1": 572, "y1": 168, "text": "نام خانوادگینسبت"},
+        {"x0": 588, "y0": 160, "x1": 597, "y1": 168, "text": "نام"},
+        {"x0": 486, "y0": 160, "x1": 505, "y1": 168, "text": "کد ملی"},
+        # data row (y 174-184)
+        {"x0": 524, "y0": 174, "x1": 541, "y1": 182, "text": "مسمر"},
+        {"x0": 546, "y0": 174, "x1": 572, "y1": 184, "text": "جهانی فر"},
+        {"x0": 584, "y0": 174, "x1": 597, "y1": 183, "text": "زهرا"},
+        {"x0": 613, "y0": 174, "x1": 650, "y1": 183, "text": "۰۵۲۴۱۸۷۲۹۸"},
+        # row below (y 184-190)
+        {"x0": 327, "y0": 184, "x1": 365, "y1": 190, "text": "کفالت بعلت"},
+    ]
+    cells = {}
+    for gx in range(520 // 6, 600 // 6 + 1):
+        for gy in range(168 // 6, 186 // 6 + 1):
+            cells[(gx, gy)] = 8
+    name = app._pick_name_from_words(words, None, _Clip(99, 159, 711, 189), cells, "paddle", None)
+    assert name == "زهرا جهانی فر", name
+
+    # 2) three rows inside the region (no header visible) -> the row the
+    #    marker really sits on (densest colored cells) wins
+    words2 = [
+        {"x0": 549, "y0": 171, "x1": 577, "y1": 177, "text": "حیدری مدویه"},
+        {"x0": 599, "y0": 171, "x1": 609, "y1": 175, "text": "کرزان"},
+        {"x0": 550, "y0": 179, "x1": 578, "y1": 187, "text": "کریمی مدولیه"},
+        {"x0": 594, "y0": 179, "x1": 610, "y1": 186, "text": "امیرعلی"},
+        {"x0": 593, "y0": 191, "x1": 610, "y1": 198, "text": "امیرعلی"},
+    ]
+    cells2 = {}
+    for gx in range(540 // 6, 618 // 6 + 1):
+        for gy in range(180 // 6, 190 // 6 + 1):  # dense marker band 180-190
+            cells2[(gx, gy)] = 8
+    name2 = app._pick_name_from_words(words2, None, _Clip(537, 168, 621, 201), cells2, "paddle", None)
+    assert name2 == "امیرعلی کریمی مدولیه", name2
+
+
 def test_ui_builds():
     root = FakeRoot()
     app = m.PDFToolkit(root)
@@ -342,6 +389,7 @@ def main():
         test_extract_person_name,
         test_clean_highlight_text,
         test_unique_name,
+        test_pick_name_from_words,
         test_colored_regions,
         test_ui_builds,
     ]

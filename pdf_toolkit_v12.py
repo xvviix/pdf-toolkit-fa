@@ -1423,7 +1423,7 @@ class PDFToolkit:
         return candidates[0] if candidates else None
 
     @staticmethod
-    def _find_colored_regions(w, h, data, stride, sat_threshold=30, cell=6, min_cells=6, min_width_px=24):
+    def _find_colored_regions(w, h, data, stride, sat_threshold=30, cell=6, min_cells=6, min_width_px=24, return_cells=False):
         """ناحیه‌های رنگیِ اشباع‌شده (غیر خاکستری/سیاه‌وسفید) را در بافر RGB پیدا می‌کند.
 
         data: بایت‌های خام RGB (مثل fitz.Pixmap.samples)؛ stride: طول هر ردیف.
@@ -1432,12 +1432,16 @@ class PDFToolkit:
         سلول‌های رنگیِ همسایه است (مثلاً یک خط ماژیک). هر رنگی در نظر
         گرفته می‌شود، نه فقط زرد: هر پیکسلی که «سیاه‌وسفید/خاکستری نیست»
         یعنی max(r,g,b) - min(r,g,b) آستانه را رد کرده، رنگی است.
+        اگر return_cells=True باشد، (regions, colored_cells) برمی‌گردد؛
+        colored_cells مجموعهٔ سلول‌های رنگی به شبکهٔ ۶ پیکسلی است (برای
+        تشخیص کلماتی که واقعاً رویش ماژیک خورده).
         """
         d = data
         st = stride
         th = sat_threshold
         cl = cell
         cells = set()
+        cellcnt = {}
         for y in range(h):
             off = y * st
             gy = y // cl
@@ -1452,9 +1456,11 @@ class PDFToolkit:
                 if b < mn:
                     mn = b
                 if mx - mn > th:
-                    cells.add(((x3 // 3) // cl, gy))
+                    key = ((x3 // 3) // cl, gy)
+                    cells.add(key)
+                    cellcnt[key] = cellcnt.get(key, 0) + 1
         if not cells:
-            return []
+            return ([], None) if return_cells else []
         seen = set()
         regions = []
         for c in cells:
@@ -1487,18 +1493,22 @@ class PDFToolkit:
                 continue
             regions.append({"x0": px0, "y0": py0, "x1": px1, "y1": py1,
                             "count": cnt, "width": px1 - px0})
+        if return_cells:
+            return regions, cellcnt
         return regions
 
-    def _find_pixel_marked_rect(self, page):
+    def _find_pixel_marked_region(self, page):
         """هایلایت دستی (ماژیک روی کاغذ) را با رنگ پیکسل در صفحهٔ اسکن‌شده پیدا می‌کند.
 
-        صفحه با DPI پایین رندر می‌شود و ناحیهٔ رنگی (هر رنگ غیرسیاه‌وسفید)
-        کشف می‌شود. بهترین ناحیه به‌صورت fitz.Rect با مختصات صفحه بازمی‌گردد.
+        بازمی‌گرداند: (fitz.Rect, مجموعهٔ سلول‌های رنگی در مختصات صفحه
+        (نقطه) بر شبکهٔ ۶pt) یا (None, None). مجموعهٔ سلول‌ها برای مشخص
+        کردن کلماتی استفاده می‌شود که واقعاً رویش ماژیک هستند (ردیف‌های
+        همسایهٔ جدول که ماژیک به‌اندازهٔ کافی روی آن‌ها نیامده، حذف می‌شوند).
         """
         try:
             import fitz
         except ImportError:
-            return None
+            return None, None
         try:
             pr = page.rect
             # محدود کردن تعداد پیکسل در صفحات خیلی بزرگ (~۱.۲ میلیون پیکسل)
@@ -1507,19 +1517,318 @@ class PDFToolkit:
             if pix.colorspace is not None and getattr(pix.colorspace, "name", "") != "DeviceRGB":
                 pix = fitz.Pixmap(fitz.csRGB, pix)
             if pix.n < 3:
-                return None
-            regions = self._find_colored_regions(pix.width, pix.height, pix.samples, pix.stride)
+                return None, None
+            regions, all_cells = self._find_colored_regions(
+                pix.width, pix.height, pix.samples, pix.stride, return_cells=True)
             if not regions:
-                return None
+                return None, None
             best = max(regions, key=lambda r: (r["count"], r["width"]))
-            return fitz.Rect(
+            cl = 6
+            # فقط سلول‌های همین ناحیه (نویز پراکندهٔ سراسر صفحه حذف شود)
+            x0c, y0c = best["x0"] // cl, best["y0"] // cl
+            x1c, y1c = (best["x1"] - 1) // cl, (best["y1"] - 1) // cl
+            cells = {c: n for c, n in all_cells.items()
+                     if x0c <= c[0] <= x1c and y0c <= c[1] <= y1c}
+            rect = fitz.Rect(
                 max(0.0, best["x0"] / scale),
                 max(0.0, best["y0"] / scale),
                 min(pr.width, best["x1"] / scale),
                 min(pr.height, best["y1"] / scale),
             )
+            # مختصات سلول‌ها در شبکهٔ ۶pt صفحه (برای مقایسه با جعبه‌های کلمات)
+            # مقدار هر سلول = تعداد پیکسل‌های رنگی آن (چگالی ماژیک)
+            cells_pt = {}
+            for (cx, cy), n in cells.items():
+                k = (round(cx / scale), round(cy / scale))
+                cells_pt[k] = cells_pt.get(k, 0) + n
+            return rect, cells_pt
+        except Exception:
+            return None, None
+
+    def _find_pixel_marked_rect(self, page):
+        """سازگار با قبل: فقط مستطیل هایلایت."""
+        rect, _cells = self._find_pixel_marked_region(page)
+        return rect
+
+    @staticmethod
+    def _norm_fa(t):
+        """نرمال‌سازی حروف فارسی (ی/ک) برای تطبیق مطمئن برچسب‌ها."""
+        return t.replace("\u0649", "\u06CC").replace("\u064A", "\u06CC").replace("\u0643", "\u06A9").strip()
+
+    def _word_on_marker(self, word, cells, pad=3.0, min_ratio=0.15, cl=6.0):
+        """آیا کلمه واقعاً رویش ناحیهٔ رنگی (ماژیک) قرار دارد؟"""
+        if not cells:
+            return True
+        x0, y0 = word["x0"] - pad, word["y0"] - pad
+        x1, y1 = word["x1"] + pad, word["y1"] + pad
+        gx0, gx1 = int(x0 // cl), int(x1 // cl)
+        gy0, gy1 = int(y0 // cl), int(y1 // cl)
+        total = 0
+        hit = 0
+        for gx in range(gx0, gx1 + 1):
+            for gy in range(gy0, gy1 + 1):
+                total += 1
+                if (gx, gy) in cells:
+                    hit += 1
+        if total and hit >= 2 and hit / total >= min_ratio:
+            return True
+        # جایگزین: مرکز کلمه داخل محدودهٔ ماژیک
+        cx, cy = (word["x0"] + word["x1"]) / 2, (word["y0"] + word["y1"]) / 2
+        xs = [c[0] for c in cells]
+        ys = [c[1] for c in cells]
+        return ((min(xs) * cl - 4) <= cx <= (max(xs) + 1) * cl + 4 and
+                (min(ys) * cl - 4) <= cy <= (max(ys) + 1) * cl + 4)
+
+    def _ocr_words_in_page(self, tmp_name, ocr_type, ocr_engine, clip):
+        """تصویر ناحیه را OCR می‌کند و کلمات را با جعبه در مختصات صفحه (نقطه) برمی‌گرداند."""
+        words = []
+        s = 300.0 / 72.0
+        try:
+            if ocr_type == "paddle":
+                result = ocr_engine.predict(tmp_name)
+                for res in result:
+                    texts = res.get("rec_texts", [])
+                    polys = res.get("rec_polys", [])
+                    for i, t in enumerate(texts):
+                        t = str(t)
+                        if not t.strip():
+                            continue
+                        box = polys[i] if i < len(polys) else None
+                        if box is None:
+                            continue
+                        x0 = min(p[0] for p in box); x1 = max(p[0] for p in box)
+                        y0 = min(p[1] for p in box); y1 = max(p[1] for p in box)
+                        words.append({"x0": clip.x0 + x0 / s, "y0": clip.y0 + y0 / s,
+                                      "x1": clip.x0 + x1 / s, "y1": clip.y0 + y1 / s,
+                                      "text": t.strip()})
+            else:
+                result, _ = ocr_engine(tmp_name)
+                for item in result or []:
+                    try:
+                        box, text, score = item[0], item[1], float(item[2])
+                        if score < 0.3 or not str(text).strip():
+                            continue
+                        x0 = min(p[0] for p in box); x1 = max(p[0] for p in box)
+                        y0 = min(p[1] for p in box); y1 = max(p[1] for p in box)
+                        words.append({"x0": clip.x0 + x0 / s, "y0": clip.y0 + y0 / s,
+                                      "x1": clip.x0 + x1 / s, "y1": clip.y0 + y1 / s,
+                                      "text": str(text).strip()})
+                    except Exception:
+                        continue
+        except Exception:
+            return []
+        return words
+
+    @staticmethod
+    def _cluster_lines(words, min_overlap=0.35):
+        """کلمات را به سطوح متنی می‌رساند (بر اساس همپوشانی عمودی)."""
+        ws = sorted(words, key=lambda w: (w["y0"] + w["y1"]) / 2)
+        lines = []
+        for w in ws:
+            wh = w["y1"] - w["y0"]
+            placed = False
+            for L in lines:
+                overlap = min(L["y1"], w["y1"]) - max(L["y0"], w["y0"])
+                if overlap >= min_overlap * min(L["y1"] - L["y0"], wh):
+                    L["words"].append(w)
+                    L["y0"] = min(L["y0"], w["y0"])
+                    L["y1"] = max(L["y1"], w["y1"])
+                    placed = True
+                    break
+            if not placed:
+                lines.append({"y0": w["y0"], "y1": w["y1"], "words": [w]})
+        return lines
+
+    @staticmethod
+    def _line_rtl(line):
+        """کلمات یک سطح به ترتیب خوانش راست‌به‌چپ (فارسی)."""
+        return sorted(line["words"], key=lambda w: -((w["x0"] + w["x1"]) / 2))
+
+    @staticmethod
+    def _marker_cell_count_y(cells, y0, y1):
+        """تعداد سلول‌های رنگی ماژیک در بازهٔ عمودی مشخص."""
+        if not cells:
+            return 0
+        n = 0
+        for (_gx, gy), c in cells.items():
+            if (y0 - 1) <= gy * 6 + 3 <= (y1 + 1):
+                n += c
+        return n
+
+    def _name_columns_from_words(self, words):
+        """اگر برچسب‌های «نام» و «نام خانوادگی» در میان کلمات باشند، ستون‌هایشان را می‌دهد.
+
+        بازمی‌گرداند: ((fam_x0, fam_x1), (first_x0, first_x1), مجموعهٔ id کلمات
+        برچسبی) یا None. تطبیق دقیق «نام خانوادگی» اولویت دارد تا برچسب‌های
+        مشابه (مثل «نام و نام خانوادگی» در جعبهٔ بالای صفحه) سردرگم نشوند.
+        """
+        fam_exact = None
+        fam_any = None
+        firsts = []
+        for w in words:
+            t = self._norm_fa(w["text"])
+            if t in ("نام خانوادگی", "نام خانوادگي"):
+                if fam_exact is None:
+                    fam_exact = w
+            elif "خانوادگی" in t or "خانوادگي" in t:
+                if fam_any is None or len(t) < len(self._norm_fa(fam_any["text"])):
+                    fam_any = w
+            elif t == "نام":
+                firsts.append(w)
+        fam = fam_exact if fam_exact is not None else fam_any
+        fam_range = None
+        first_range = None
+        if fam is not None:
+            fam_range = (fam["x0"], fam["x1"])
+        if firsts:
+            if fam is not None:
+                # ستون نام معمولاً راست‌تر از ستون نام خانوادگی است (چیدمان RTL)
+                right = [w for w in firsts if w["x0"] >= fam["x1"] - 3]
+                pick = min(right, key=lambda w: w["x0"]) if right else \
+                       min(firsts, key=lambda w: abs(w["x0"] - fam["x1"]))
+            else:
+                pick = firsts[0]
+            first_range = (pick["x0"], pick["x1"])
+        if fam_range is None and first_range is None:
+            return None
+        labels = set()
+        if fam is not None:
+            labels.add(id(fam))
+        if first_range is not None:
+            labels.add(id(pick))
+        return fam_range, first_range, labels
+
+    def _name_columns_above(self, page, clip, ocr_type, ocr_engine):
+        """برچسب‌های «نام»/«نام خانوادگی» را در سرِ جدول، بالای ناحیه جست‌وجو می‌کند."""
+        try:
+            import fitz
+        except ImportError:
+            return None
+        try:
+            pr = page.rect
+            band = fitz.Rect(max(0, clip.x0 - 15), max(0, clip.y0 - 130),
+                             min(pr.width, clip.x1 + 15), max(0, clip.y0 - 2))
+            if band.height < 8 or band.width < 40:
+                return None
+            pix = page.get_pixmap(dpi=300, clip=band)
+            tmp_name = None
+            try:
+                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                    tmp_name = tmp.name
+                pix.save(tmp_name)
+                words = self._ocr_words_in_page(tmp_name, ocr_type, ocr_engine, band)
+            finally:
+                if tmp_name:
+                    try:
+                        os.unlink(tmp_name)
+                    except OSError:
+                        pass
+            if not words:
+                return None
+            return self._name_columns_from_words(words)
         except Exception:
             return None
+
+    def _best_name_run(self, word_list, first_range):
+        """بهترین گروهِ هم‌پوشِ ۱ تا ۴ کلمهٔ شبیه‌به‌نام را برمی‌گرداند."""
+        if not word_list:
+            return ""
+        best, best_score = "", 0
+        n = len(word_list)
+        for i in range(n):
+            for j in range(i + 1, min(i + 5, n + 1)):
+                run = " ".join(w["text"] for w in word_list[i:j])
+                _status, score, _issues = self._validate_name(run)
+                if j - i in (2, 3):
+                    score += 5   # نام‌های ۲–۴ کلمه‌ای رایج‌ترند
+                if len(run.split()) > 3:
+                    score -= (len(run.split()) - 3) * 8   # کلمهٔ اضافه کم‌احتمال است
+                if first_range is not None:
+                    if any(first_range[0] - 5 <= (w["x0"] + w["x1"]) / 2 <= first_range[1] + 5
+                           for w in word_list[i:j]):
+                        score += 10   # گروه شامل کلمهٔ ستون «نام» مطمئن‌تر است
+                if score > best_score:
+                    best_score, best = score, run
+        return best if best_score >= 45 else ""
+
+    def _pick_name_from_words(self, words, page, clip, cells, ocr_type, ocr_engine):
+        """فقط نام را از کلمات ناحیهٔ هایلایت‌شده استخراج می‌کند.
+
+        ۱) کلماتی که واقعاً رویش ماژیک هستند (اگر اطلاعات پیکسلی باشد)
+        ۲) ستون‌های «نام»/«نام خانوادگی» اگر سر جدول دیده شود (داخل ناحیه یا بالای آن)
+        ۳) از سطوح به‌دست‌آمده، سطحی که ماژیک واقعاً روی آن است (بیشترین سلول رنگی)
+        """
+        if not words:
+            return ""
+        # ۱) حذف کلمات ردیف‌های همسایه (واقعاً رویش ماژیک نیستند)
+        if cells:
+            kept = [w for w in words if self._word_on_marker(w, cells)]
+            if kept:
+                words = kept
+        # ۲) ستون‌های نام/نام خانوادگی
+        first_range = None
+        used_cols = False
+        cols = self._name_columns_from_words(words)
+        if cols is None:
+            cols = self._name_columns_above(page, clip, ocr_type, ocr_engine)
+        if cols:
+            fam_range, first_range, labels = cols
+            sel = []
+            for w in words:
+                if id(w) in labels:
+                    continue
+                cx = (w["x0"] + w["x1"]) / 2
+                ok = (fam_range is not None and fam_range[0] - 5 <= cx <= fam_range[1] + 5) or \
+                     (first_range is not None and first_range[0] - 5 <= cx <= first_range[1] + 5)
+                if ok:
+                    sel.append(w)
+            if sel:
+                words = sel
+                used_cols = True
+        lines = self._cluster_lines(words)
+        if not lines:
+            return ""
+        # ناحیهٔ کوچک با یک سطح: رفتار قبلی (چسباندن کلمات)
+        if len(words) <= 4 and len(lines) == 1 and not used_cols:
+            text = " ".join(w["text"] for w in self._line_rtl(lines[0]))
+            return self._clean_highlight_text(text)
+        # ۳) چند سطح / کلمات زیاد → سطحی که ماژیک واقعاً روی آن است
+        scored = []
+        for L in lines:
+            Lw = self._line_rtl(L)
+            text = " ".join(w["text"] for w in Lw)
+            _status, score, _issues = self._validate_name(text)
+            weight = self._marker_cell_count_y(cells, L["y0"], L["y1"])
+            scored.append((score, weight, (L["y0"] + L["y1"]) / 2, Lw, text))
+        good = [s for s in scored if s[0] >= 45]
+        if not good:
+            text = " ".join(w["text"] for w in sorted(words, key=lambda w: -((w["x0"] + w["x1"]) / 2)))
+            return self._clean_highlight_text(text)
+        if cells:
+            max_w = max(g[1] for g in good)
+            if max_w > 0:
+                top = max(good, key=lambda g: g[1])
+                # اگر سطح دوم هم چگالی مقارن (≥۷۰٪) داشته باشد و ناحیه باریک باشد
+                # → احتمالاً نام روی دو خط نوشته شده → هر دو را با هم بخوان
+                near = [g for g in good if g[1] >= 0.7 * max_w]
+                if len(near) == 2 and (clip.x1 - clip.x0) < 200:
+                    allw = []
+                    for g in sorted(near, key=lambda g: g[2]):
+                        allw.extend(g[3])
+                    allw.sort(key=lambda w: (round(w["y0"] / 4), -(w["x0"] + w["x1"]) / 2))
+                    text = " ".join(w["text"] for w in allw)
+                    return self._clean_highlight_text(text)
+                best_score, _w, _ly, best_words, best_text = top
+            else:
+                best_score, _w, _ly, best_words, best_text = max(good, key=lambda g: g[0])
+        else:
+            best_score, _w, _ly, best_words, best_text = max(good, key=lambda g: g[0])
+        # سطح انتخاب‌شده طولانی است (یا ستون‌ها معلوم است) → بهترین قطعهٔ نام درون آن
+        if used_cols or len(best_words) > 4:
+            run = self._best_name_run(best_words, first_range)
+            if run:
+                best_text = run
+        return self._clean_highlight_text(best_text)
 
     def _ocr_highlighted_name(self, ocr_type, ocr_engine, doc, page_num):
         """نام را از ناحیهٔ هایلایت‌شده می‌خواند.
@@ -1527,6 +1836,8 @@ class PDFToolkit:
         - اگر PDF متنی باشد: همان متن داخل هایلایت گرفته می‌شود.
         - اگر PDF اسکن شده باشد: ناحیه به تصویر تبدیل و OCR می‌شود.
         - هایلایت دستی (ماژیک) روی اسکن‌ها پیکسل‌به‌پیکسل و با هر رنگی پیدا می‌شود.
+        - اگر هایلایت پهن باشد (مثلاً یک ردیف کامل جدول)، فقط ستون‌های
+          «نام»/«نام خانوادگی» خوانده می‌شوند و اسم‌های دیگر ردیف بیرون می‌مانند.
         برمی‌گرداند: نام تمیز شده یا رشتهٔ خالی.
         """
         try:
@@ -1535,6 +1846,7 @@ class PDFToolkit:
             except ImportError:
                 return ""
             page = doc[page_num]
+            cells = None
             rect = self._find_highlight_rect(page)
             if rect is None:
                 # هایلایت دستی (ماژیک روی کاغذ) انوتیشن ندارد؛ روی صفحات
@@ -1545,7 +1857,7 @@ class PDFToolkit:
                 except Exception:
                     has_text = False
                 if not has_text:
-                    rect = self._find_pixel_marked_rect(page)
+                    rect, cells = self._find_pixel_marked_region(page)
             if rect is None:
                 return ""
             # کمی حاشیه دور هایلایت برای خواندن بهتر
@@ -1571,25 +1883,16 @@ class PDFToolkit:
                 with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
                     tmp_name = tmp.name
                 pix.save(tmp_name)
-                if ocr_type == "paddle":
-                    result = ocr_engine.predict(tmp_name)
-                    texts = []
-                    for res in result:
-                        texts.extend(str(t) for t in res.get("rec_texts", []))
-                else:
-                    result, _ = ocr_engine(tmp_name)
-                    texts = [str(item[1]) for item in (result or []) if item[1].strip()]
+                words = self._ocr_words_in_page(tmp_name, ocr_type, ocr_engine, clip)
             finally:
                 if tmp_name:
                     try:
                         os.unlink(tmp_name)
                     except OSError:
                         pass
-            if not texts:
+            if not words:
                 return ""
-            # همهٔ خطوط ناحیه را با هم ترکیب کن
-            joined = " ".join(t.strip() for t in texts if t.strip())
-            name = self._clean_highlight_text(joined)
+            name = self._pick_name_from_words(words, page, clip, cells, ocr_type, ocr_engine)
             return self._sanitize_filename(name) if name else ""
         except Exception:
             return ""
